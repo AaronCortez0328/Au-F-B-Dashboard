@@ -9,6 +9,8 @@ import { useData, StarredOrder } from "@/lib/data-context";
 import { useToast } from "@/lib/toast-context";
 import { OrderStatus, OrderType } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import LiveBadge from "@/components/ui/LiveBadge";
+import { useGHL } from "@/lib/hooks/use-ghl";
 import { Search, Eye, Pencil, ArrowLeftRight, Star, Plus, X } from "lucide-react";
 
 const STATUSES: OrderStatus[] = ["Pending", "Confirmed", "Preparing", "Out for Delivery", "Delivered", "Cancelled"];
@@ -25,8 +27,16 @@ const STATUS_FLOW: Record<OrderStatus, OrderStatus | null> = {
 };
 
 export default function OrdersPage() {
-  const { orders, addOrder, updateOrder } = useData();
+  const { orders: localOrders, addOrder, updateOrder } = useData();
   const { toast } = useToast();
+  const { data: ghlOrders, loading: ghlLoading, error: ghlError, lastUpdated, refetch } = useGHL<any[]>("/api/ghl/opportunities");
+
+  // GHL opportunities are the source of truth; locally added orders are appended
+  const orders: StarredOrder[] = useMemo(() => {
+    const ghl = (ghlOrders ?? []).map((o: any) => ({ ...o, items: o.items ?? [], starred: o.starred ?? false } as StarredOrder));
+    const localOnly = localOrders.filter(o => !(o as any).source);
+    return [...ghl, ...localOnly];
+  }, [ghlOrders, localOrders]);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "All">("All");
@@ -100,14 +110,17 @@ export default function OrdersPage() {
     <DashboardLayout title="Orders">
       <div className="p-6 space-y-5">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-xl font-bold text-gray-900">Orders &amp; Transactions</h2>
+            <h2 className="text-xl font-bold text-gray-900">Orders &amp; Opportunities</h2>
             <p className="text-sm text-gray-500 mt-0.5">{filtered.length} total records</p>
           </div>
-          <button onClick={() => setAddOpen(true)} className="flex items-center gap-2 px-4 py-2.5 bg-primary-500 text-white text-sm font-semibold rounded-xl hover:bg-primary-600 transition-colors shadow-sm">
-            <Plus size={16} /> Add Order
-          </button>
+          <div className="flex items-center gap-3">
+            <LiveBadge lastUpdated={lastUpdated} loading={ghlLoading} error={ghlError} onRefresh={refetch} />
+            <button onClick={() => setAddOpen(true)} className="flex items-center gap-2 px-4 py-2.5 bg-primary-500 text-white text-sm font-semibold rounded-xl hover:bg-primary-600 transition-colors shadow-sm">
+              <Plus size={16} /> Add Order
+            </button>
+          </div>
         </div>
 
         {/* Status KPI row */}
@@ -174,7 +187,10 @@ export default function OrdersPage() {
                     <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{formatDate(o.date)}</td>
                     <td className="px-4 py-3"><span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{o.type}</span></td>
                     <td className="px-4 py-3 font-semibold text-gray-800">{formatCurrency(o.total)}</td>
-                    <td className="px-4 py-3"><StatusBadge status={o.status} /></td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={o.status} />
+                      {(o as any).stageName && <p className="text-[10px] text-gray-400 mt-0.5">{(o as any).stageName}</p>}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
                         <button onClick={() => setViewOrder(o)} title="View details" className="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"><Eye size={14} /></button>
@@ -204,27 +220,34 @@ export default function OrdersPage() {
               ))}
               <div><p className="text-xs text-gray-400 uppercase tracking-wide">Status</p><div className="mt-1"><StatusBadge status={viewOrder.status} /></div></div>
             </div>
-            <div className="border border-gray-100 rounded-lg overflow-hidden">
-              <table className="w-full text-sm">
-                <thead><tr className="bg-gray-50 border-b border-gray-100">
-                  {["Item", "Qty", "Unit Price", "Subtotal"].map(h => <th key={h} className={`px-4 py-2 text-xs text-gray-500 ${h !== "Item" ? "text-right" : "text-left"}`}>{h}</th>)}
-                </tr></thead>
-                <tbody className="divide-y divide-gray-50">
-                  {viewOrder.items.map((item, i) => (
-                    <tr key={i}>
-                      <td className="px-4 py-2.5 text-gray-800">{item.name}</td>
-                      <td className="px-4 py-2.5 text-right text-gray-600">{item.qty}</td>
-                      <td className="px-4 py-2.5 text-right text-gray-600">{formatCurrency(item.price)}</td>
-                      <td className="px-4 py-2.5 text-right font-medium text-gray-800">{formatCurrency(item.qty * item.price)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot><tr className="bg-primary-50 border-t border-primary-100">
-                  <td colSpan={3} className="px-4 py-2.5 text-sm font-semibold text-gray-700">Total</td>
-                  <td className="px-4 py-2.5 text-right text-sm font-bold text-primary-700">{formatCurrency(viewOrder.total)}</td>
-                </tr></tfoot>
-              </table>
-            </div>
+            {viewOrder.items.length > 0 ? (
+              <div className="border border-gray-100 rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead><tr className="bg-gray-50 border-b border-gray-100">
+                    {["Item", "Qty", "Unit Price", "Subtotal"].map(h => <th key={h} className={`px-4 py-2 text-xs text-gray-500 ${h !== "Item" ? "text-right" : "text-left"}`}>{h}</th>)}
+                  </tr></thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {viewOrder.items.map((item, i) => (
+                      <tr key={i}>
+                        <td className="px-4 py-2.5 text-gray-800">{item.name}</td>
+                        <td className="px-4 py-2.5 text-right text-gray-600">{item.qty}</td>
+                        <td className="px-4 py-2.5 text-right text-gray-600">{formatCurrency(item.price)}</td>
+                        <td className="px-4 py-2.5 text-right font-medium text-gray-800">{formatCurrency(item.qty * item.price)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr className="bg-primary-50 border-t border-primary-100">
+                    <td colSpan={3} className="px-4 py-2.5 text-sm font-semibold text-gray-700">Total</td>
+                    <td className="px-4 py-2.5 text-right text-sm font-bold text-primary-700">{formatCurrency(viewOrder.total)}</td>
+                  </tr></tfoot>
+                </table>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
+                <span className="text-sm text-gray-500">Pipeline value</span>
+                <span className="font-bold text-primary-700">{formatCurrency(viewOrder.total)}</span>
+              </div>
+            )}
             {viewOrder.notes && <div><p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Notes</p><p className="text-sm text-gray-700 bg-yellow-50 border border-yellow-100 rounded-lg p-3">{viewOrder.notes}</p></div>}
             {/* Advance status */}
             {STATUS_FLOW[viewOrder.status] && (

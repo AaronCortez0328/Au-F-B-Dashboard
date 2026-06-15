@@ -9,6 +9,8 @@ import { useData } from "@/lib/data-context";
 import { useToast } from "@/lib/toast-context";
 import { CateringEvent, EventStatus } from "@/lib/data";
 import { formatDate } from "@/lib/utils";
+import LiveBadge from "@/components/ui/LiveBadge";
+import { useGHL } from "@/lib/hooks/use-ghl";
 import { Search, Plus, Eye, Pencil, CalendarRange, Users, X } from "lucide-react";
 
 const STATUSES: EventStatus[] = ["Upcoming", "In Progress", "Completed", "Cancelled"];
@@ -17,8 +19,16 @@ const PER_PAGE = 8;
 const blankForm = { client: "", venue: "", date: "", headcount: "", dietary: "", package: "Corporate Lunch", notes: "", branch: "" };
 
 export default function EventsPage() {
-  const { cateringEvents, addEvent, updateEvent } = useData();
+  const { cateringEvents: localEvents, addEvent, updateEvent } = useData();
   const { toast } = useToast();
+  const { data: ghlEvents, loading: ghlLoading, error: ghlError, lastUpdated, refetch } = useGHL<any[]>("/api/ghl/appointments");
+
+  // GHL appointments are source of truth; locally added events are appended
+  const cateringEvents: CateringEvent[] = useMemo(() => {
+    const ghl = (ghlEvents ?? []) as CateringEvent[];
+    const localOnly = localEvents.filter(e => !(e as any).source);
+    return [...ghl, ...localOnly];
+  }, [ghlEvents, localEvents]);
 
   const [statusFilter, setStatusFilter] = useState<EventStatus | "All">("All");
   const [search, setSearch] = useState("");
@@ -90,9 +100,12 @@ export default function EventsPage() {
       <div className="p-6 space-y-5">
         <div className="flex items-center justify-between">
           <div><h2 className="text-xl font-bold text-gray-900">Catering Events</h2><p className="text-sm text-gray-500 mt-0.5">{filtered.length} records</p></div>
-          <button onClick={() => setAddOpen(true)} className="flex items-center gap-2 px-4 py-2.5 bg-primary-500 text-white text-sm font-semibold rounded-xl hover:bg-primary-600 transition-colors shadow-sm">
-            <Plus size={16} /> Add Event
-          </button>
+          <div className="flex items-center gap-3">
+            <LiveBadge lastUpdated={lastUpdated} loading={ghlLoading} error={ghlError} onRefresh={refetch} />
+            <button onClick={() => setAddOpen(true)} className="flex items-center gap-2 px-4 py-2.5 bg-primary-500 text-white text-sm font-semibold rounded-xl hover:bg-primary-600 transition-colors shadow-sm">
+              <Plus size={16} /> Add Event
+            </button>
+          </div>
         </div>
 
         <div className="flex gap-2 flex-wrap">

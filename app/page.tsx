@@ -3,7 +3,9 @@
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import KPICard from "@/components/ui/KPICard";
 import StatusBadge from "@/components/ui/StatusBadge";
+import LiveBadge from "@/components/ui/LiveBadge";
 import { useData } from "@/lib/data-context";
+import { useGHL } from "@/lib/hooks/use-ghl";
 import { trendData } from "@/lib/data";
 import {
   ShoppingCart, DollarSign, CalendarRange, Clock, UtensilsCrossed,
@@ -17,15 +19,21 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import Link from "next/link";
 
 export default function OverviewPage() {
-  const { orders, cateringEvents, menuItems, inventoryItems, staffMembers } = useData();
+  const { menuItems, inventoryItems, staffMembers } = useData();
+
+  const { data: ghlOrders, loading: ordersLoading, error: ordersError, lastUpdated: ordersUpdated, refetch: refetchOrders } = useGHL<any[]>("/api/ghl/opportunities");
+  const { data: ghlEvents, loading: eventsLoading, error: eventsError, lastUpdated: eventsUpdated, refetch: refetchEvents } = useGHL<any[]>("/api/ghl/appointments");
+
+  const orders = ghlOrders ?? [];
+  const events = ghlEvents ?? [];
 
   const recentOrders = [...orders].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 5);
-  const upcomingEvents = cateringEvents.filter(e => e.status === "Upcoming").slice(0, 3);
-  const totalRevenue = orders.filter(o => o.status !== "Cancelled").reduce((s, o) => s + o.total, 0);
-  const activeEvents = cateringEvents.filter(e => e.status === "Upcoming" || e.status === "In Progress").length;
-  const pendingOrders = orders.filter(o => o.status === "Pending").length;
+  const upcomingEvents = events.filter((e: any) => e.status === "Upcoming").slice(0, 3);
+  const totalRevenue = orders.filter((o: any) => o.status !== "Cancelled").reduce((s: number, o: any) => s + (o.total ?? 0), 0);
+  const activeEvents = events.filter((e: any) => e.status === "Upcoming" || e.status === "In Progress").length;
+  const pendingOrders = orders.filter((o: any) => o.status === "Pending").length;
   const onDutyCount = staffMembers.filter(s => s.status === "On Duty").length;
-  const avgOrderValue = totalRevenue / Math.max(orders.filter(o => o.status !== "Cancelled").length, 1);
+  const avgOrderValue = totalRevenue / Math.max(orders.filter((o: any) => o.status !== "Cancelled").length, 1);
   const criticalStock = inventoryItems.filter(i => i.status === "Critical" || i.status === "Out");
 
   const topMenuItems = [...menuItems]
@@ -33,19 +41,36 @@ export default function OverviewPage() {
     .slice(0, 6)
     .map(m => ({ name: m.name.length > 22 ? m.name.slice(0, 22) + "…" : m.name, orders: m.ordersThisMonth }));
 
+  const connected = !ordersError && !eventsError;
+
   return (
     <DashboardLayout title="Overview Dashboard">
       <div className="p-6 space-y-6">
 
+        {/* Live status bar */}
+        <div className="flex flex-wrap items-center gap-3">
+          <LiveBadge
+            lastUpdated={ordersUpdated ?? eventsUpdated}
+            loading={ordersLoading || eventsLoading}
+            error={ordersError ?? eventsError}
+            onRefresh={() => { refetchOrders(); refetchEvents(); }}
+          />
+          {connected && (
+            <span className="text-xs text-gray-400">
+              {orders.length} opportunities · {events.length} appointments pulled from GoHighLevel
+            </span>
+          )}
+        </div>
+
         {/* KPI Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <KPICard title="Total Orders" value={orders.length} trend={-6} prevValue="27" icon={ShoppingCart} />
-          <KPICard title="Revenue (AUD)" value={formatCurrency(totalRevenue)} trend={12} prevValue="$18.4k" icon={DollarSign} iconBg="bg-green-50" iconColor="text-green-600" />
-          <KPICard title="Active Catering Events" value={activeEvents} trend={40} prevValue="10" icon={CalendarRange} iconBg="bg-blue-50" iconColor="text-blue-600" />
-          <KPICard title="Pending Orders" value={pendingOrders} trend={-25} prevValue="4" icon={Clock} iconBg="bg-yellow-50" iconColor="text-yellow-600" />
+          <KPICard title="Total Opportunities" value={ordersLoading ? "…" : orders.length} trend={0} prevValue="" icon={ShoppingCart} />
+          <KPICard title="Pipeline Value (AUD)" value={ordersLoading ? "…" : formatCurrency(totalRevenue)} trend={12} prevValue="$18.4k" icon={DollarSign} iconBg="bg-green-50" iconColor="text-green-600" />
+          <KPICard title="Active Events" value={eventsLoading ? "…" : activeEvents} trend={40} prevValue="10" icon={CalendarRange} iconBg="bg-blue-50" iconColor="text-blue-600" />
+          <KPICard title="Pending" value={ordersLoading ? "…" : pendingOrders} trend={-25} prevValue="4" icon={Clock} iconBg="bg-yellow-50" iconColor="text-yellow-600" />
           <KPICard title="Menu Items" value={menuItems.filter(m => m.status === "Available").length} trend={5} prevValue="28" icon={UtensilsCrossed} iconBg="bg-accent-50" iconColor="text-accent-600" />
           <KPICard title="Staff On Duty" value={onDutyCount} trend={17} prevValue="12" icon={Users} iconBg="bg-purple-50" iconColor="text-purple-600" />
-          <KPICard title="Avg Order Value" value={formatCurrency(avgOrderValue)} trend={8} prevValue="$188" icon={TrendingUp} iconBg="bg-teal-50" iconColor="text-teal-600" />
+          <KPICard title="Avg Deal Value" value={ordersLoading ? "…" : formatCurrency(avgOrderValue)} trend={8} prevValue="$188" icon={TrendingUp} iconBg="bg-teal-50" iconColor="text-teal-600" />
           <KPICard title="Customer Rating" value="4.8 ★" trend={2} prevValue="4.7" icon={Star} iconBg="bg-orange-50" iconColor="text-orange-500" />
         </div>
 
@@ -83,20 +108,26 @@ export default function OverviewPage() {
 
         {/* Bottom row */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Recent Orders */}
+          {/* Recent Opportunities */}
           <div className="lg:col-span-1 bg-white rounded-xl border border-gray-200 p-5">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold text-gray-800">Recent Orders</h2>
+              <h2 className="text-sm font-semibold text-gray-800">Recent Opportunities</h2>
               <Link href="/orders" className="text-xs text-primary-600 hover:underline flex items-center gap-0.5">View All <ArrowRight size={11} /></Link>
             </div>
-            <div className="space-y-3">
-              {recentOrders.map(o => (
-                <div key={o.id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-                  <div><p className="text-xs font-medium text-gray-800">{o.reference}</p><p className="text-[11px] text-gray-400">{o.customer}</p></div>
-                  <div className="text-right"><StatusBadge status={o.status} size="sm" /><p className="text-[11px] text-gray-400 mt-0.5">{formatCurrency(o.total)}</p></div>
-                </div>
-              ))}
-            </div>
+            {ordersLoading ? (
+              <div className="space-y-3">{[...Array(4)].map((_, i) => <div key={i} className="h-10 bg-gray-100 rounded-lg animate-pulse" />)}</div>
+            ) : recentOrders.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-6">No opportunities found in GHL</p>
+            ) : (
+              <div className="space-y-3">
+                {recentOrders.map((o: any) => (
+                  <div key={o.id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+                    <div><p className="text-xs font-medium text-gray-800">{o.reference}</p><p className="text-[11px] text-gray-400">{o.customer}</p></div>
+                    <div className="text-right"><StatusBadge status={o.status} size="sm" /><p className="text-[11px] text-gray-400 mt-0.5">{formatCurrency(o.total)}</p></div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Upcoming Events */}
@@ -105,17 +136,22 @@ export default function OverviewPage() {
               <h2 className="text-sm font-semibold text-gray-800">Upcoming Events</h2>
               <Link href="/events" className="text-xs text-primary-600 hover:underline flex items-center gap-0.5">View All <ArrowRight size={11} /></Link>
             </div>
-            <div className="space-y-3">
-              {upcomingEvents.map(ev => (
-                <div key={ev.id} className="p-3 rounded-lg border border-gray-100 hover:border-primary-200 transition-colors">
-                  <div className="flex items-start justify-between gap-2">
-                    <div><p className="text-xs font-semibold text-gray-800">{ev.client}</p><p className="text-[11px] text-gray-400 mt-0.5">{ev.venue}</p></div>
-                    <span className="text-[10px] bg-primary-50 text-primary-700 px-2 py-0.5 rounded-full font-medium shrink-0">{ev.headcount} guests</span>
+            {eventsLoading ? (
+              <div className="space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="h-16 bg-gray-100 rounded-lg animate-pulse" />)}</div>
+            ) : upcomingEvents.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-6">No upcoming events in GHL</p>
+            ) : (
+              <div className="space-y-3">
+                {upcomingEvents.map((ev: any) => (
+                  <div key={ev.id} className="p-3 rounded-lg border border-gray-100 hover:border-primary-200 transition-colors">
+                    <div className="flex items-start justify-between gap-2">
+                      <div><p className="text-xs font-semibold text-gray-800">{ev.client}</p><p className="text-[11px] text-gray-400 mt-0.5">{ev.venue || "—"}</p></div>
+                    </div>
+                    <p className="text-[11px] text-accent-600 font-medium mt-1.5">{ev.date ? formatDate(ev.date) : "—"}</p>
                   </div>
-                  <p className="text-[11px] text-accent-600 font-medium mt-1.5">{formatDate(ev.date)}</p>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Urgent Alerts */}
