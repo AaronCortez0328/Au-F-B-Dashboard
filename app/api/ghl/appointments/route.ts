@@ -11,17 +11,39 @@ function mapStatus(status: string): string {
 
 export async function GET() {
   try {
+    // Fetch calendars first — events endpoint requires a calendarId
+    const calData = await ghlGet("/calendars/", { locationId: LOCATION_ID });
+    const calendars: any[] = calData.calendars ?? [];
+
+    // No calendars configured in GHL yet — return empty gracefully
+    if (calendars.length === 0) {
+      return NextResponse.json([]);
+    }
+
     const now = Date.now();
     const sixMonthsAgo = now - 180 * 24 * 60 * 60 * 1000;
     const oneYearAhead = now + 365 * 24 * 60 * 60 * 1000;
 
-    const data = await ghlGet("/calendars/events", {
-      locationId: LOCATION_ID,
-      startTime: String(sixMonthsAgo),
-      endTime: String(oneYearAhead),
-    });
+    // Fetch events for each calendar in parallel
+    const results = await Promise.allSettled(
+      calendars.map(cal =>
+        ghlGet("/calendars/events", {
+          locationId: LOCATION_ID,
+          calendarId: cal.id,
+          startTime: String(sixMonthsAgo),
+          endTime: String(oneYearAhead),
+        })
+      )
+    );
 
-    const events = (data.events ?? []).map((ev: any) => ({
+    const allEvents: any[] = [];
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        allEvents.push(...(result.value.events ?? []));
+      }
+    }
+
+    const events = allEvents.map((ev: any) => ({
       id: ev.id,
       reference: `EV-${ev.id.slice(-5).toUpperCase()}`,
       client: ev.title ?? ev.contact?.name ?? "Unnamed Event",
