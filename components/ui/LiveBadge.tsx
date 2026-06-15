@@ -16,10 +16,10 @@ export default function LiveBadge({ lastUpdated, loading, error, onRefresh }: Pr
 
   if (error) {
     return (
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600">
-        <WifiOff size={12} />
-        <span>GHL offline — showing cached data</span>
-        <button onClick={onRefresh} className="underline hover:no-underline ml-1">Retry</button>
+      <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600 max-w-sm">
+        <WifiOff size={12} className="shrink-0" />
+        <span className="truncate" title={error}>GHL error: {error}</span>
+        <button onClick={onRefresh} className="underline hover:no-underline ml-1 shrink-0">Retry</button>
       </div>
     );
   }
